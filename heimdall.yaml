@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heimdall
+  labels:
+    app: heimdall
+  namespace: heimdall
+spec:
+  selector:
+    matchLabels:
+      app: heimdall
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: heimdall
+    spec:
+      containers:
+      - name: heimdall
+        image: linuxserver/heimdall
+
+        env:
+          - name: FORCE_HTTPS
+            value: "true"
+
+        ports:
+          - containerPort: 80
+            name: http
+            protocol: TCP
+
+        volumeMounts:
+          - name: config
+            mountPath: /config
+      volumes:
+        - name: config
+          hostPath:
+             path: /container-files/heimdall
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: heimdall-service
+  namespace: heimdall
+
+spec:
+  ports:
+  - name: https
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: heimdall
+  sessionAffinity: None
+  type: NodePort
+
+status:
+  loadBalancer: {}
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-heimdall
+  namespace: heimdall
+  annotations:
+    cert-manager.io/issue-temporary-certificate: "true"
+    acme.cert-manager.io/http01-edit-in-place: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  rules:
+  - host: apps.vels.online
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: heimdall-service
+            port:
+              number: 80
+
+  tls:
+  - hosts:
+    - apps.vels.online
+    secretName: apps-tls-secret
