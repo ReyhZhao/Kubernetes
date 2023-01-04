@@ -1,0 +1,107 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authelia
+  labels:
+    app: authelia
+  namespace: authelia
+  annotations:
+    #keel.sh/policy: all
+    keel.sh/policy: major
+    keel.sh/trigger: poll
+    keel.sh/pollSchedule: "@every 720m"
+spec:
+  selector:
+    matchLabels:
+      app: authelia
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: authelia
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        kubernetes.io/hostname: kubernetes
+      containers:
+      - name: authelia
+        image: ghcr.io/authelia/authelia:4.37.3
+
+        ports:
+          - containerPort: 9091
+            name: http
+            protocol: TCP
+        volumeMounts:
+          - name: data-nfs
+            mountPath: /config
+
+
+
+      volumes:
+        - name: data-nfs
+          persistentVolumeClaim:
+            claimName: pvc-authelia
+
+---
+
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth
+  namespace: authelia
+spec:
+  externalTrafficPolicy: Local
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 9091
+  selector:
+    app: authelia
+  sessionAffinity: None
+  type: NodePort
+
+status:
+  loadBalancer: {}
+
+
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-authelia
+  namespace: authelia
+  annotations:
+    cert-manager.io/issue-temporary-certificate: "true"
+    #acme.cert-manager.io/http01-edit-in-place: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Host $host;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-Host $http_host;
+      proxy_set_header X-Forwarded-Uri $request_uri;
+
+spec:
+  rules:
+  - host: auth.vels.online
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: auth
+            port:
+              number: 80
+
+  tls:
+  - hosts:
+    - auth.vels.online
+    secretName: authelia-tls-secret
